@@ -1,0 +1,27 @@
+{
+  "name": "excel-table-paste",
+  "version": "1.0.0",
+  "description": "Obsidian plugin that converts pasted Excel or web tables into Markdown tables.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+  },
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "excel",
+    "markdown",
+    "table"
+  ],
+  "author": "Leoz",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.25.0",
+    "obsidian": "latest",
+    "tslib": "^2.8.1",
+    "typescript": "^5.7.2"
+  }
+}
