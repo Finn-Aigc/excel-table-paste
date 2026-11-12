@@ -1,4 +1,19 @@
+# Dependencies
 node_modules/
+
+# Build output (distributed through GitHub releases)
 main.js
 *.map
+
+# Obsidian runtime data
+data.json
+
+# Office temporary files
+~$*
+
+# Editors and OS
+.vscode/
+.idea/
+*.iml
 .DS_Store
+Thumbs.db

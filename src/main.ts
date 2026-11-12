@@ -1,6 +1,7 @@
 import { App, Editor, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import {
   ConvertOptions,
+  HtmlTableStrategy,
   TableAlignment,
   convertHtmlToMarkdown,
   gridToMarkdown,
@@ -8,21 +9,26 @@ import {
   looksLikeSpreadsheetText,
   parseDelimited,
 } from "./converter";
+import { isInProtectedContext } from "./context";
 
 interface ExcelTablePasteSettings {
   autoConvert: boolean;
   convertHtmlTables: boolean;
+  htmlTableStrategy: HtmlTableStrategy;
   firstRowAsHeader: boolean;
   alignment: TableAlignment;
   trimCells: boolean;
+  alignSourceWidths: boolean;
 }
 
 const DEFAULT_SETTINGS: ExcelTablePasteSettings = {
   autoConvert: true,
   convertHtmlTables: true,
+  htmlTableStrategy: "largest",
   firstRowAsHeader: true,
   alignment: "default",
   trimCells: true,
+  alignSourceWidths: true,
 };
 
 export default class ExcelTablePastePlugin extends Plugin {
@@ -43,6 +49,15 @@ export default class ExcelTablePastePlugin extends Plugin {
       editorCallback: (editor) => this.convertSelection(editor),
     });
 
+    this.addCommand({
+      id: "paste-clipboard-as-markdown-table",
+      name: "从剪贴板粘贴为 Markdown 表格",
+      hotkeys: [{ modifiers: ["Mod", "Alt"], key: "v" }],
+      editorCallback: async (editor) => {
+        await this.pasteClipboardAsTable(editor);
+      },
+    });
+
     this.addSettingTab(new ExcelTablePasteSettingTab(this.app, this));
   }
 
@@ -59,6 +74,8 @@ export default class ExcelTablePastePlugin extends Plugin {
       firstRowAsHeader: this.settings.firstRowAsHeader,
       alignment: this.settings.alignment,
       trimCells: this.settings.trimCells,
+      htmlTableStrategy: this.settings.htmlTableStrategy,
+      alignSourceWidths: this.settings.alignSourceWidths,
     };
   }
 
@@ -69,6 +86,12 @@ export default class ExcelTablePastePlugin extends Plugin {
 
     const clipboard = event.clipboardData;
     if (!clipboard) {
+      return;
+    }
+
+    // Preserve Obsidian's "paste as plain text" for plain-text-only clipboards.
+    const clipboardTypes = Array.from(clipboard.types);
+    if (clipboardTypes.length === 1 && clipboardTypes[0] === "text/plain") {
       return;
     }
 
@@ -85,7 +108,7 @@ export default class ExcelTablePastePlugin extends Plugin {
       markdown = gridToMarkdown(parseDelimited(text), options);
     }
 
-    if (!markdown) {
+    if (!markdown || this.isProtectedPaste(editor)) {
       return;
     }
 
@@ -93,28 +116,67 @@ export default class ExcelTablePastePlugin extends Plugin {
     this.insertBlock(editor, markdown);
   }
 
+  private isProtectedPaste(editor: Editor): boolean {
+    const from = editor.getCursor("from");
+    const to = editor.getCursor("to");
+    const maxLine = Math.max(from.line, to.line);
+    const lines = Array.from({ length: maxLine + 1 }, (_, index) =>
+      editor.getLine(index)
+    );
+
+    return (
+      isInProtectedContext(lines, from.line) ||
+      isInProtectedContext(lines, to.line)
+    );
+  }
+
   private convertSelection(editor: Editor) {
     const selection = editor.getSelection();
     if (selection.trim() === "") {
-      new Notice("请先选中以制表符分隔的表格文本");
+      new Notice("请先选中需要转换的表格文本");
       return;
     }
 
-    const grid = parseDelimited(selection).filter((row) =>
-      row.some((cell) => cell.trim() !== "")
-    );
-    if (grid.length === 0 || grid.every((row) => row.length < 2)) {
+    const markdown = this.convertText(selection);
+    if (!markdown) {
       new Notice("选中内容不是可识别的表格数据");
       return;
     }
 
-    const markdown = gridToMarkdown(grid, this.toConvertOptions());
+    this.insertBlock(editor, markdown);
+  }
+
+  private async pasteClipboardAsTable(editor: Editor) {
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      new Notice("无法读取剪贴板，请检查 Obsidian 的剪贴板权限");
+      return;
+    }
+
+    if (text.trim() === "") {
+      new Notice("剪贴板中没有可转换的文本");
+      return;
+    }
+
+    const markdown = this.convertText(text);
     if (!markdown) {
-      new Notice("未能转换选中内容");
+      new Notice("剪贴板中没有可转换的表格数据");
       return;
     }
 
     this.insertBlock(editor, markdown);
+  }
+
+  private convertText(text: string): string | null {
+    const grid = parseDelimited(text).filter((row) =>
+      row.some((cell) => cell.trim() !== "")
+    );
+    if (grid.length === 0) {
+      return null;
+    }
+    return gridToMarkdown(grid, this.toConvertOptions());
   }
 
   private insertBlock(editor: Editor, content: string) {
@@ -145,7 +207,7 @@ class ExcelTablePasteSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("自动转换粘贴内容")
-      .setDesc("检测到 Excel、网页表格或制表符分隔的文本时，自动转换为 Markdown 表格。")
+      .setDesc("自动识别 Excel 和网页表格；纯文本剪贴板保留 Obsidian 默认粘贴，可用命令或默认快捷键 Ctrl/Cmd+Alt+V 转换。")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.autoConvert).onChange(async (value) => {
           this.plugin.settings.autoConvert = value;
@@ -166,6 +228,21 @@ class ExcelTablePasteSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("网页表格选择")
+      .setDesc("网页包含多个表格时，自动选择单元格最多的表格，或始终使用第一个。")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("largest", "自动选择最大表格")
+          .addOption("first", "仅第一个表格")
+          .setValue(this.plugin.settings.htmlTableStrategy)
+          .onChange(async (value) => {
+            this.plugin.settings.htmlTableStrategy =
+              value as HtmlTableStrategy;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
       .setName("首行作为表头")
       .setDesc("关闭时生成空的表头行，并把所有行作为表格正文。")
       .addToggle((toggle) =>
@@ -179,7 +256,7 @@ class ExcelTablePasteSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("单元格对齐方式")
-      .setDesc("写入 Markdown 表格分隔行，例如居中为 :---:。")
+      .setDesc("全表默认对齐；表头单元格以 ^l、^c、^r 开头可单独覆盖该列。")
       .addDropdown((dropdown) =>
         dropdown
           .addOption("default", "默认")
@@ -201,6 +278,18 @@ class ExcelTablePasteSettingTab extends PluginSettingTab {
           this.plugin.settings.trimCells = value;
           await this.plugin.saveSettings();
         })
+      );
+
+    new Setting(containerEl)
+      .setName("源码列宽对齐")
+      .setDesc("按显示宽度给单元格补空格，使源码模式下列对齐；关闭后输出紧凑表格。")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.alignSourceWidths)
+          .onChange(async (value) => {
+            this.plugin.settings.alignSourceWidths = value;
+            await this.plugin.saveSettings();
+          })
       );
   }
 }
