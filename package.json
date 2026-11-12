@@ -17,6 +17,9 @@
   ],
   "author": "Leoz",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.22.2"
+  },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "builtin-modules": "^4.0.0",

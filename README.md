@@ -117,7 +117,7 @@ Paste tables copied from Excel, WPS, or web pages into Obsidian as Markdown tabl
 
 ## 开发
 
-需要 Node.js 20 或更高版本。
+需要 Node.js 22.22.2 或更高版本（测试依赖 jsdom 的要求）。
 
 ```bash
 git clone https://github.com/Finn-Aigc/excel-table-paste.git
