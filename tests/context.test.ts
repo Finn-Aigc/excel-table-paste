@@ -71,4 +71,46 @@ describe("isInProtectedContext", () => {
     expect(isInProtectedContext(["a"], -1)).toBe(false);
     expect(isInProtectedContext(["a"], 2)).toBe(false);
   });
+
+  it("文档中部的水平线不是 frontmatter", () => {
+    const lines = ["正文", "---", "正文"];
+    expect(isInProtectedContext(lines, 1)).toBe(false);
+    expect(isInProtectedContext(lines, 2)).toBe(false);
+  });
+
+  it("frontmatter 标记允许尾随空格", () => {
+    const lines = ["---  ", "title: test", "--- ", "正文"];
+    expect(isInProtectedContext(lines, 1)).toBe(true);
+    expect(isInProtectedContext(lines, 2)).toBe(true);
+    expect(isInProtectedContext(lines, 3)).toBe(false);
+  });
+
+  it("识别缩进围栏代码块", () => {
+    const lines = ["正文", "  ```ts", "  code", "  ```", "正文"];
+    expect(isInProtectedContext(lines, 1)).toBe(true);
+    expect(isInProtectedContext(lines, 2)).toBe(true);
+    expect(isInProtectedContext(lines, 3)).toBe(true);
+    expect(isInProtectedContext(lines, 4)).toBe(false);
+  });
+
+  it("围栏结束符允许尾随空格", () => {
+    const lines = ["```", "code", "```  ", "正文"];
+    expect(isInProtectedContext(lines, 2)).toBe(true);
+    expect(isInProtectedContext(lines, 3)).toBe(false);
+  });
+
+  it("未闭合围栏保护到文档末尾", () => {
+    const lines = ["正文", "```", "code"];
+    expect(isInProtectedContext(lines, 2)).toBe(true);
+  });
+
+  it("单个竖线不是表格行", () => {
+    expect(isInProtectedContext(["|", "正文"], 0)).toBe(false);
+  });
+
+  it("围栏内的表格行受围栏保护", () => {
+    const lines = ["```", "| a | b |", "```", "正文"];
+    expect(isInProtectedContext(lines, 1)).toBe(true);
+    expect(isInProtectedContext(lines, 3)).toBe(false);
+  });
 });

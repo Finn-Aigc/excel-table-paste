@@ -73,6 +73,26 @@ describe("parseDelimited", () => {
   it("结尾换行不产生多余行", () => {
     expect(parseDelimited("a\tb\n")).toEqual([["a", "b"]]);
   });
+
+  it("未闭合引号保留到文本结尾", () => {
+    expect(parseDelimited('"abc')).toEqual([["abc"]]);
+  });
+
+  it("引号字段可以出现在任意列", () => {
+    expect(parseDelimited('a\t"b\tc"\td')).toEqual([["a", "b\tc", "d"]]);
+  });
+
+  it("空引号字段解析为空单元格", () => {
+    expect(parseDelimited('""\t""')).toEqual([["", ""]]);
+  });
+
+  it("闭合引号后的普通字符并入字段", () => {
+    expect(parseDelimited('"a"b\tc')).toEqual([["ab", "c"]]);
+  });
+
+  it("引号内保留回车符", () => {
+    expect(parseDelimited('"a\rb"\tc')).toEqual([["a\rb", "c"]]);
+  });
 });
 
 describe("looksLikeSpreadsheetText", () => {
@@ -91,6 +111,14 @@ describe("looksLikeSpreadsheetText", () => {
 
   it("只有空单元格时返回 false", () => {
     expect(looksLikeSpreadsheetText("\t\n\t")).toBe(false);
+  });
+
+  it("引号内的制表符不算多列", () => {
+    expect(looksLikeSpreadsheetText('"a\tb"')).toBe(false);
+  });
+
+  it("任意一行有两列即识别为表格", () => {
+    expect(looksLikeSpreadsheetText("a\nb\tc")).toBe(true);
   });
 });
 
@@ -147,6 +175,73 @@ describe("htmlTableToGrid", () => {
       ["A", "B"],
       ["A", "C"],
     ]);
+  });
+
+  it("同时展开 colspan 和 rowspan", () => {
+    const grid = htmlTableToGrid(
+      parseTable(
+        "<table>" +
+          '<tr><td colspan="2" rowspan="2">M</td><td>A</td></tr>' +
+          "<tr><td>B</td></tr>" +
+          "<tr><td>C</td><td>D</td><td>E</td></tr>" +
+          "</table>"
+      )
+    );
+    expect(grid).toEqual([
+      ["M", "M", "A"],
+      ["M", "M", "B"],
+      ["C", "D", "E"],
+    ]);
+  });
+
+  it("同一行多个 rowspan 各自延续", () => {
+    const grid = htmlTableToGrid(
+      parseTable(
+        "<table>" +
+          '<tr><td rowspan="2">A</td><td rowspan="2">B</td><td>C</td></tr>' +
+          "<tr><td>D</td></tr>" +
+          "</table>"
+      )
+    );
+    expect(grid).toEqual([
+      ["A", "B", "C"],
+      ["A", "B", "D"],
+    ]);
+  });
+
+  it("rowspan 超出表格末尾时安全结束", () => {
+    const grid = htmlTableToGrid(
+      parseTable(
+        "<table>" +
+          '<tr><td rowspan="5">A</td><td>B</td></tr>' +
+          "<tr><td>C</td></tr>" +
+          "</table>"
+      )
+    );
+    expect(grid).toEqual([
+      ["A", "B"],
+      ["A", "C"],
+    ]);
+  });
+
+  it("读取 thead/tbody 中的 th 和 td", () => {
+    const grid = htmlTableToGrid(
+      parseTable(
+        "<table><thead><tr><th>H1</th><th>H2</th></tr></thead>" +
+          "<tbody><tr><td>a</td><td>b</td></tr></tbody></table>"
+      )
+    );
+    expect(grid).toEqual([
+      ["H1", "H2"],
+      ["a", "b"],
+    ]);
+  });
+
+  it("非法 colspan 按 1 处理", () => {
+    const grid = htmlTableToGrid(
+      parseTable('<table><tr><td colspan="abc">a</td><td>b</td></tr></table>')
+    );
+    expect(grid).toEqual([["a", "b"]]);
   });
 });
 
@@ -228,6 +323,40 @@ describe("convertHtmlToMarkdown", () => {
     expect(
       convertHtmlToMarkdown("<table><tr><td>a</td></tr></table>", baseOptions)
     ).toBeNull();
+  });
+
+  it("单元格数相同时选择列数更多的表格", () => {
+    const html =
+      "<table><tr><td>A</td></tr><tr><td>B</td></tr></table>" +
+      "<table><tr><td>C</td><td>D</td></tr></table>";
+    expect(convertHtmlToMarkdown(html, baseOptions)).toBe(
+      "| C   | D   |\n| --- | --- |"
+    );
+  });
+
+  it("评分完全相同时保留第一个表格", () => {
+    const html =
+      "<table><tr><td>A</td></tr></table>" +
+      "<table><tr><td>B</td></tr></table>";
+    expect(convertHtmlToMarkdown(html, baseOptions)).toBe("| A   |\n| --- |");
+  });
+
+  it("空表格或全空单元格返回 null", () => {
+    expect(convertHtmlToMarkdown("<table></table>", baseOptions)).toBeNull();
+    expect(
+      convertHtmlToMarkdown("<table><tr><td> </td></tr></table>", baseOptions)
+    ).toBeNull();
+  });
+
+  it("解码 HTML 实体", () => {
+    const html =
+      "<table>" +
+      "<tr><td>A &amp; B</td><td>&lt;tag&gt;</td></tr>" +
+      "<tr><td>1</td><td>2</td></tr>" +
+      "</table>";
+    expect(convertHtmlToMarkdown(html, baseOptions)).toBe(
+      "| A & B | <tag> |\n| ----- | ----- |\n| 1     | 2     |"
+    );
   });
 });
 
@@ -421,5 +550,71 @@ describe("gridToMarkdown", () => {
   it("空数据返回 null", () => {
     expect(gridToMarkdown([], baseOptions)).toBeNull();
     expect(gridToMarkdown([["", ""]], baseOptions)).toBeNull();
+  });
+
+  it("只有表头行时不输出正文", () => {
+    expect(gridToMarkdown([["a", "b"]], baseOptions)).toBe(
+      "| a   | b   |\n| --- | --- |"
+    );
+  });
+
+  it("只有对齐标记的表头变为空表头", () => {
+    expect(gridToMarkdown([["^l", "^c"], ["1", "2"]], baseOptions)).toBe(
+      "|      |       |\n| :--- | :---: |\n| 1    | 2     |"
+    );
+  });
+
+  it("对齐标记后没有空格也能识别", () => {
+    expect(gridToMarkdown([["^l名称"], ["a"]], baseOptions)).toBe(
+      "| 名称 |\n| :--- |\n| a    |"
+    );
+  });
+
+  it("无效对齐标记按普通文本处理", () => {
+    expect(gridToMarkdown([["^x a", "b"], ["1", "2"]], baseOptions)).toBe(
+      "| ^x a | b   |\n| ---- | --- |\n| 1    | 2   |"
+    );
+  });
+
+  it("对齐标记不在开头时不解析", () => {
+    expect(gridToMarkdown([["a^l", "b"], ["1", "2"]], baseOptions)).toBe(
+      "| a^l | b   |\n| --- | --- |\n| 1   | 2   |"
+    );
+  });
+
+  it("emoji 按两列宽度对齐", () => {
+    expect(gridToMarkdown([["📦", "x"], ["1", "2"]], baseOptions)).toBe(
+      "| 📦  | x   |\n| --- | --- |\n| 1   | 2   |"
+    );
+  });
+
+  it("组合字符不占显示宽度", () => {
+    expect(gridToMarkdown([["e\u0301", "x"], ["1", "2"]], baseOptions)).toBe(
+      "| e\u0301   | x   |\n| --- | --- |\n| 1   | 2   |"
+    );
+  });
+
+  it("单元格内 CRLF 转为 br", () => {
+    expect(gridToMarkdown([["a\r\nb"], ["1"]], baseOptions)).toBe(
+      "| a<br>b |\n| ------ |\n| 1      |"
+    );
+  });
+
+  it("保留中间空行", () => {
+    expect(
+      gridToMarkdown([["a", "b"], ["", ""], ["c", "d"]], baseOptions)
+    ).toBe("| a   | b   |\n| --- | --- |\n|     |     |\n| c   | d   |");
+  });
+
+  it("保留开头空列", () => {
+    expect(gridToMarkdown([["", "a"], ["", "b"]], baseOptions)).toBe(
+      "|     | a   |\n| --- | --- |\n|     | b   |"
+    );
+  });
+
+  it("后续行更长时按最大列数补齐", () => {
+    expect(gridToMarkdown([["a"], ["b", "c"]], baseOptions)).toBe(
+      "| a   |     |\n| --- | --- |\n| b   | c   |"
+    );
   });
 });

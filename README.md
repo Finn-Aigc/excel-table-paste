@@ -1,5 +1,7 @@
 # Excel Table Paste
 
+[![CI](https://github.com/Finn-Aigc/excel-table-paste/actions/workflows/ci.yml/badge.svg)](https://github.com/Finn-Aigc/excel-table-paste/actions/workflows/ci.yml)
+
 Paste tables copied from Excel, WPS, or web pages into Obsidian as Markdown tables.
 
 将 Excel、WPS 或网页中的表格粘贴到 Obsidian 时，自动转换为标准 Markdown 表格。
@@ -39,7 +41,7 @@ Paste tables copied from Excel, WPS, or web pages into Obsidian as Markdown tabl
 ### 使用 BRAT 安装
 
 1. 安装并启用 BRAT
-2. 在 BRAT 中添加 Beta 插件：`<your-github-user>/excel-table-paste`
+2. 在 BRAT 中添加 Beta 插件：`Finn-Aigc/excel-table-paste`
 
 需要仓库中已存在与 `manifest.json` 版本号一致的 GitHub Release。
 
@@ -62,7 +64,7 @@ Paste tables copied from Excel, WPS, or web pages into Obsidian as Markdown tabl
 ### 命令与快捷键
 
 - **从剪贴板粘贴为 Markdown 表格**：默认快捷键 `Ctrl/Cmd+Alt+V`，支持单列表格和纯文本剪贴板
-- **将选中内容转换为 Markdown 表格**：转换当前选中的制表符文本
+- **将选中内容转换为 Markdown 表格**：转换当前选中的文本，支持单列数据
 
 快捷键可以在「设置 → 快捷键」中修改。
 
@@ -115,20 +117,41 @@ Paste tables copied from Excel, WPS, or web pages into Obsidian as Markdown tabl
 
 ## 开发
 
+需要 Node.js 20 或更高版本。
+
 ```bash
+git clone https://github.com/Finn-Aigc/excel-table-paste.git
+cd excel-table-paste
 npm install
 npm run dev
 npm run build
 npm test
 ```
 
-`npm run dev` 会监听源码并生成 `main.js`；`npm run build` 执行类型检查和生产构建；`npm test` 运行 `tests/` 下的 Vitest 单元测试。
+`npm run dev` 会监听源码并生成 `main.js`；`npm run build` 执行类型检查和生产构建；`npm test` 运行 `tests/` 下的 Vitest 单元测试（转换器、上下文保护和粘贴处理逻辑，其中 `obsidian` 模块由 `tests/__mocks__/obsidian.ts` 模拟）。
+
+在库中调试时，把 `main.js` 和 `manifest.json` 复制到 `<你的库>/.obsidian/plugins/excel-table-paste/`，或把该目录软链接到仓库目录，然后在 Obsidian 中启用插件。修改源码后 `npm run dev` 会自动重新构建，在 Obsidian 中重新加载插件即可生效。
+
+### 手动测试
+
+`test-data/excel-table-paste-test.xlsx` 是手动测试工作簿，包含以下工作表：
+
+| 工作表 | 测试内容 |
+| --- | --- |
+| 说明 | 各工作表的用法和预期结果 |
+| 基本表格 | 复制 A1:J7，测试多列表格、空单元格和源码列宽对齐 |
+| 合并单元格 | 复制 A1:D6，测试 `colspan` / `rowspan` 合并单元格展开 |
+| 特殊内容 | 复制 A1:C11，测试单元格内换行、竖线、引号、空格和长文本 |
+| 单列数据 | 复制 A1:A10，用命令或 `Ctrl/Cmd+Alt+V` 测试单列表格 |
+| 标题行 | 复制 A1:J5，观察首行只有 URL 时的默认表头行为 |
+
+在 Excel 或 WPS 中打开，按「说明」工作表的指引复制对应区域并粘贴到 Obsidian，核对转换结果。
 
 ## 发布
 
-仓库包含 GitHub Actions CI 和发布流程。CI 在 push/PR 时运行测试与构建；发布流程在推送与版本号一致的 tag 后运行测试、校验版本、构建插件并创建 GitHub Release。
+仓库包含 GitHub Actions CI 和发布流程。CI 在 push/PR 时运行测试与构建；发布流程在推送与版本号一致的 tag 后先校验版本（`manifest.json`、`package.json`、`package-lock.json` 的版本号与 tag 一致，且 `versions.json` 包含该版本条目），再运行测试、构建插件并创建 GitHub Release。
 
-1. 同步更新 `manifest.json`、`package.json`、`versions.json` 中的版本号
+1. 同步更新 `manifest.json`、`package.json`、`versions.json` 中的版本号（`package-lock.json` 可用 `npm version --no-git-tag-version <版本号>` 同步）
 2. 提交源码并推送
 3. 创建并推送 tag，不要加 `v` 前缀：
 
